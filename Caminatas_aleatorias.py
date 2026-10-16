@@ -3,6 +3,7 @@ import numpy as np                  # numeros aleatorios y operaciones con arreg
 import networkx as nx               # construccion de los grafos
 import matplotlib.pyplot as plt     # graficas
 import matplotlib.ticker as mtick   # para formatear el eje Y como porcentaje
+from matplotlib.lines import Line2D # para el cuadro de tiempos de mezcla (leyenda sin dibujo)
 import math                         # para elegir "pasos bonitos" en los ejes Y
 import time                         # medir tiempo de ejecucion
 from bisect import bisect_right     # busqueda rapida del siguiente nodo en la fila acumulada de P
@@ -18,19 +19,17 @@ EPSILON = 0.05      # umbral para decidir que la caminata ya "se mezclo"
 EPSILON2 = 0.25     # segundo umbral (el que usa el libro), solo para COMPARAR visualmente
                     # en las graficas de d(t); no se usa para calcular ningun t_mezcla
 NODO_INICIAL = 0    # todos los caminantes arrancan en este nodo
+LLEVAR_A_CERO_TRAS_MEZCLA = True   # en d(t) y d_cesaro(t), despues de t_mezcla la curva se dibuja en 0
+                                   # (limite teorico; la curva simulada queda en un piso de ruido)
 
 
-#FUNCION PARA GENERAR LOS 5 GRAFOS (n = 25 nodos, etiquetados 0..24)
+#FUNCION PARA GENERAR LOS 4 GRAFOS (n = 25 nodos, etiquetados 0..24)
 def generar_grafos(n=N_NODOS):
     grafos = {}
     grafos["Camino"] = nx.path_graph(n)          # nodos conectados en linea: 0-1-2-...-24
     grafos["Ciclo"] = nx.cycle_graph(n)          # como el camino, pero el ultimo nodo se conecta con el 0
     grafos["Estrella"] = nx.star_graph(n - 1)    # 1 nodo central conectado a los otros 24 (star_graph(k) crea k+1 nodos)
     grafos["Completo"] = nx.complete_graph(n)    # todos los nodos conectados entre si
-
-    G_malla = nx.grid_2d_graph(5, 5)             # rejilla 5x5 = 25 nodos, etiquetados como (fila, col)
-    G_malla = nx.convert_node_labels_to_integers(G_malla, ordering="sorted")  # renombramos a 0..24
-    grafos["Malla"] = G_malla
     return grafos
 
 
@@ -74,7 +73,7 @@ def contar_visitas(trayectorias, n=N_NODOS):
     return H
 
 
-#FUNCION: METRICAS DE EXPLORACION (las del PDF), calculadas caminante por caminante
+#FUNCION: METRICAS DE EXPLORACION, calculadas caminante por caminante
 #   V(t)    = |{X_0, ..., X_t}|           vertices distintos visitados hasta el paso t
 #   C(t)    = V(t) / N                    fraccion de cobertura
 #   T_cov   = min{t : V(t) = N}           tiempo de cobertura
@@ -183,16 +182,15 @@ def formato_porcentaje(x, pos):
     return texto + "%"
 
 
-# FUNCION: crea la figura de 5 subgraficas (3 arriba, 2 abajo centradas) que se usa en varias ventanas
-def crear_figura_5_grafos():
-    fig = plt.figure(figsize=(20, 9))
-    gs = fig.add_gridspec(2, 6, hspace=0.45, wspace=0.6)
+# FUNCION: crea la figura de 4 subgraficas (cuadricula de 2x2) que se usa en varias ventanas
+def crear_figura_4_grafos():
+    fig = plt.figure(figsize=(14, 9))
+    gs = fig.add_gridspec(2, 2, hspace=0.45, wspace=0.3)
     ejes = {
-        "Camino":   fig.add_subplot(gs[0, 0:2]),
-        "Ciclo":    fig.add_subplot(gs[0, 2:4]),
-        "Estrella": fig.add_subplot(gs[0, 4:6]),
-        "Completo": fig.add_subplot(gs[1, 1:3]),   # fila de abajo, centrada
-        "Malla":    fig.add_subplot(gs[1, 3:5]),
+        "Camino":   fig.add_subplot(gs[0, 0]),
+        "Ciclo":    fig.add_subplot(gs[0, 1]),
+        "Estrella": fig.add_subplot(gs[1, 0]),
+        "Completo": fig.add_subplot(gs[1, 1]),
     }
     return fig, ejes
 
@@ -202,13 +200,32 @@ def fmt_num(v):
     return "no alcanzado" if v is None or (isinstance(v, float) and np.isnan(v)) else f"{v:.1f}"
 
 
+# FUNCION: dibuja, debajo de la leyenda, un segundo cuadro con los tiempos de mezcla.
+# Es otra leyenda (misma tipografia) con mode="expand", para que tenga el MISMO ANCHO que la de arriba.
+# El alto depende de cuantas lineas tenga.
+def cuadro_tiempos_bajo_leyenda(ax, leyenda, resultados, tipos, clave, titulo, separacion=0.03):
+    ax.add_artist(leyenda)            # conserva la leyenda original al crear la segunda
+    ax.figure.canvas.draw()           # necesario para conocer el tamano real de la leyenda ya dibujada
+    caja = leyenda.get_window_extent().transformed(ax.transAxes.inverted())
+
+    etiquetas = []
+    for tipo in tipos:
+        valor = resultados[tipo][clave]
+        etiquetas.append(f"{tipo} = {valor if valor is not None else 'no converge'}")
+    vacios = [Line2D([], [], linestyle="none") for _ in etiquetas]   # sin dibujo, solo texto
+
+    ax.legend(vacios, etiquetas, title=titulo, loc="upper left",
+              bbox_to_anchor=(caja.x0, caja.y0 - separacion, caja.width, 0),   # mismo x y mismo ancho que la leyenda
+              mode="expand", borderaxespad=0, handlelength=0, handletextpad=0)
+
+
 #====================================================================
 # EJECUCION PRINCIPAL
 # Flujo: 1) construir grafo -> 2) obtener matriz P -> 3) simular con P (con for)
 #        -> 4) metricas de exploracion (V, C, T_cov, tau_v, R_0)
 #        -> 5) estimar pi -> 6) d(t) y tiempo de mezcla (TVD y Cesaro)
 #====================================================================
-print(f"Simulando caminatas aleatorias sobre 5 topologias de grafo (n={N_NODOS} nodos).")
+print(f"Simulando caminatas aleatorias sobre 4 topologias de grafo (n={N_NODOS} nodos).")
 print(f"Cada grafo corre {N_SIM} caminantes independientes de {T_PASOS} pasos, saliendo del nodo {NODO_INICIAL}.\n")
 
 grafos = generar_grafos()
@@ -249,128 +266,103 @@ for tipo, G in grafos.items():
 fin = time.time()
 print(f"\nTiempo total de simulacion: {fin - inicio:.2f} s")
 
-tipos_ordenados = ["Camino", "Ciclo", "Estrella", "Completo", "Malla"]
+tipos_ordenados = ["Camino", "Ciclo", "Estrella", "Completo"]
 
 
 #--------------------------------------
 # VENTANA 1: frecuencia de visitas por nodo (datos crudos de la simulacion)
+#   Poligono de frecuencia: se unen con rectas las puntas de las barras, y los 4 grafos van en una sola grafica.
+#   El eje Y es logaritmico (como en la de primera visita) porque el centro de la Estrella (nodo 0) recibe ~50%
+#   de las visitas y sus hojas ~2%: asi caben todos los grafos en la misma escala sin recortar nada.
 #--------------------------------------
 frecuencias = {t: r["H"].sum(axis=0) / r["H"].sum() for t, r in resultados.items()}
 
-grafos_escala_chica = [t for t in frecuencias if t != "Estrella"]
-max_chico = max(frecuencias[t].max() for t in grafos_escala_chica)
-paso_chico = elegir_paso_bonito(max_chico)
-paso_estrella = elegir_paso_bonito(frecuencias["Estrella"].max())
-
-fig, ejes = crear_figura_5_grafos()
+fig, ax = plt.subplots(figsize=(10, 6))
 for tipo in tipos_ordenados:
-    ax = ejes[tipo]
-    ax.bar(range(N_NODOS), frecuencias[tipo], color="lightcoral", edgecolor="black")
-    ax.set_title(tipo)
-    ax.set_xlabel("Nodo")
-    ax.yaxis.set_major_formatter(mtick.FuncFormatter(formato_porcentaje))
-    ax.tick_params(axis="y", labelsize=8)
-    if tipo == "Estrella":
-        ax.yaxis.set_major_locator(mtick.MultipleLocator(paso_estrella))
-    else:
-        ax.yaxis.set_major_locator(mtick.MultipleLocator(paso_chico))
-        ax.set_ylim(0, max_chico * 1.1)   # mismo rango para los 4 grafos de escala chica
-ejes["Camino"].set_ylabel("Frecuencia")
-ejes["Completo"].set_ylabel("Frecuencia")
-fig.suptitle("Frecuencia de visitas por nodo (datos de la simulación)")
-plt.show()
+    ax.plot(range(N_NODOS), frecuencias[tipo], marker="o", markersize=4, linewidth=1.5, label=tipo)
 
-
-#--------------------------------------
-# VENTANA 2 (a): d(t) vs pasos para las 5 topologias, sobrepuestas (DVT normal)
-#--------------------------------------
-plt.figure(figsize=(10, 6))
-for tipo in tipos_ordenados:
-    plt.plot(resultados[tipo]["d_t"], label=tipo, linewidth=1.5)
-
-plt.axhline(y=EPSILON, color="gray", linestyle="--", linewidth=1, label=f"epsilon = {EPSILON}")
-plt.axhline(y=EPSILON2, color="gray", linestyle="--", linewidth=1, label=f"epsilon 2 = {EPSILON2}")
-
-plt.xlabel("Paso (t)")
-plt.ylabel("Distancia de variación total d(t)")
-plt.title("d(t) vs Pasos")
-plt.grid(alpha=0.3)
-plt.xscale("log")
-
-ax = plt.gca()
-ax.text(-0.01, EPSILON, r"$\epsilon$", transform=ax.get_yaxis_transform(),
-        ha="right", va="center", fontsize=10, color="gray", clip_on=False)
-ax.text(-0.01, EPSILON2, r"$\epsilon_2$", transform=ax.get_yaxis_transform(),
-        ha="right", va="center", fontsize=10, color="gray", clip_on=False)
+ax.set_yscale("log")
+# marcas "redondas" del eje Y (en fraccion) que caen dentro del rango de los datos
+todas = np.concatenate([frecuencias[t] for t in tipos_ordenados])
+candidatas = [0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.1, 0.2, 0.3, 0.5, 1.0]
+marcas_y = [c for c in candidatas if todas.min() * 0.8 <= c <= todas.max() * 1.3]
+ax.set_yticks(marcas_y)
+ax.yaxis.set_major_formatter(mtick.FuncFormatter(formato_porcentaje))
+ax.yaxis.set_minor_formatter(mtick.NullFormatter())          # sin etiquetas en las marcas menores
+ax.xaxis.set_major_locator(mtick.MultipleLocator(2))
+ax.set_xlabel("Nodo")
+ax.set_ylabel("Frecuencia de visitas")
+ax.set_title("Frecuencia de visitas por nodo (datos de la simulación)")
+ax.grid(alpha=0.3)
 ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1), borderaxespad=0)
 plt.tight_layout()
 plt.show()
 
 
 #--------------------------------------
-# VENTANA 2b: d_cesaro(t) vs pasos para las 5 topologias, sobrepuestas
+# VENTANA 2: d(t) vs pasos para las 4 topologias, sobrepuestas (DVT normal)
+# - Si LLEVAR_A_CERO_TRAS_MEZCLA = True, desde t_mezcla la curva se dibuja en 0 (limite teorico).
+# - Debajo de la leyenda va un cuadro con el tiempo de mezcla de cada grafo.
 #--------------------------------------
-plt.figure(figsize=(10, 6))
+fig, ax = plt.subplots(figsize=(11, 6))
 for tipo in tipos_ordenados:
-    plt.plot(range(1, T_PASOS + 1), resultados[tipo]["d_cesaro"], label=tipo, linewidth=1.5)
+    d_graf = resultados[tipo]["d_t"].copy()          # d_t[t] corresponde al paso t (empieza en t = 0)
+    t_mez = resultados[tipo]["t_mezcla"]
+    if LLEVAR_A_CERO_TRAS_MEZCLA and t_mez is not None:
+        d_graf[t_mez:] = 0.0                         # desde que converge, la curva baja a 0 y se queda ahi
+    ax.plot(d_graf, label=tipo, linewidth=1.5)
 
-plt.axhline(y=EPSILON, color="gray", linestyle="--", linewidth=1, label=f"epsilon = {EPSILON}")
-plt.axhline(y=EPSILON2, color="gray", linestyle="--", linewidth=1, label=f"epsilon 2 = {EPSILON2}")
+ax.axhline(y=EPSILON, color="gray", linestyle="--", linewidth=1, label=f"epsilon = {EPSILON}")
+ax.axhline(y=EPSILON2, color="gray", linestyle="--", linewidth=1, label=f"epsilon 2 = {EPSILON2}")
 
-plt.xlabel("Paso (t)")
-plt.ylabel("Distancia de Cesaro  d_cesaro(t)")
-plt.title("d_cesaro(t) vs Pasos")
-plt.grid(alpha=0.3)
-plt.xscale("log")
+ax.set_xlabel("Paso (t)")
+ax.set_ylabel("Distancia de variación total d(t)")
+ax.set_title("d(t) vs Pasos")
+ax.grid(alpha=0.3)
+ax.set_xscale("log")
 
-ax = plt.gca()
 ax.text(-0.01, EPSILON, r"$\epsilon$", transform=ax.get_yaxis_transform(),
         ha="right", va="center", fontsize=10, color="gray", clip_on=False)
 ax.text(-0.01, EPSILON2, r"$\epsilon_2$", transform=ax.get_yaxis_transform(),
         ha="right", va="center", fontsize=10, color="gray", clip_on=False)
-ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1), borderaxespad=0)
-plt.tight_layout()
+
+leyenda = ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1), borderaxespad=0, handlelength=3.5)
+fig.subplots_adjust(left=0.08, right=0.74, bottom=0.10, top=0.92)   # deja espacio a la derecha para leyenda y cuadro
+cuadro_tiempos_bajo_leyenda(ax, leyenda, resultados, tipos_ordenados, "t_mezcla",
+                            "Tiempo de mezcla\n(pasos)")
 plt.show()
 
 
 #--------------------------------------
-# VENTANA 3: comparacion en barras agrupadas -> t_mezcla (TVD) vs t_mezcla (Cesaro)
+# VENTANA 2b: d_cesaro(t) vs pasos para las 4 topologias, sobrepuestas
 #--------------------------------------
-tipos = list(resultados.keys())
+fig, ax = plt.subplots(figsize=(11, 6))
+for tipo in tipos_ordenados:
+    ax.plot(range(1, T_PASOS + 1), resultados[tipo]["d_cesaro"], label=tipo, linewidth=1.5)
 
-valores_tvd = [resultados[t]["t_mezcla"] for t in tipos]          # puede tener None si no convergio
-valores_ces = [resultados[t]["t_mezcla_cesaro"] for t in tipos]   # puede tener None si no convergio
+ax.axhline(y=EPSILON, color="gray", linestyle="--", linewidth=1, label=f"epsilon = {EPSILON}")
+ax.axhline(y=EPSILON2, color="gray", linestyle="--", linewidth=1, label=f"epsilon 2 = {EPSILON2}")
 
-alturas_tvd = [v if v is not None else 0 for v in valores_tvd]    # 0 = no se dibuja la barra
-alturas_ces = [v if v is not None else 0 for v in valores_ces]
+ax.set_xlabel("Paso (t)")
+ax.set_ylabel("Distancia de Cesaro  d_cesaro(t)")
+ax.set_title("d_cesaro(t) vs Pasos")
+ax.grid(alpha=0.3)
+ax.set_xscale("log")
 
-x = np.arange(len(tipos))
-ancho = 0.35
+ax.text(-0.01, EPSILON, r"$\epsilon$", transform=ax.get_yaxis_transform(),
+        ha="right", va="center", fontsize=10, color="gray", clip_on=False)
+ax.text(-0.01, EPSILON2, r"$\epsilon_2$", transform=ax.get_yaxis_transform(),
+        ha="right", va="center", fontsize=10, color="gray", clip_on=False)
 
-plt.figure(figsize=(10, 6))
-barras_tvd = plt.bar(x - ancho/2, alturas_tvd, ancho, label="t_mezcla (DVT)", color="#C44E52")
-barras_ces = plt.bar(x + ancho/2, alturas_ces, ancho, label="t_mezcla (Cesaro)", color="#55A868")
-
-plt.xlabel("Tipo de grafo")
-plt.ylabel("Pasos para llegar al tiempo de mezcla")
-plt.title(f"Comparación: Tiempo de mezcla DVT vs Cesaro (epsilon = {EPSILON})")
-plt.xticks(x, tipos)
-plt.legend()
-plt.grid(axis="y", alpha=0.3)
-
-for barra, valor in zip(barras_tvd, valores_tvd):
-    etiqueta = str(valor) if valor is not None else "no\nalcanzado"
-    plt.text(barra.get_x() + barra.get_width() / 2, barra.get_height(),
-             etiqueta, ha="center", va="bottom", fontsize=6)
-for barra, valor in zip(barras_ces, valores_ces):
-    etiqueta = str(valor) if valor is not None else "no\nalcanzado"
-    plt.text(barra.get_x() + barra.get_width() / 2, barra.get_height(),
-             etiqueta, ha="center", va="bottom", fontsize=6)
+leyenda = ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1), borderaxespad=0, handlelength=3.5)
+fig.subplots_adjust(left=0.08, right=0.74, bottom=0.10, top=0.92)
+cuadro_tiempos_bajo_leyenda(ax, leyenda, resultados, tipos_ordenados, "t_mezcla_cesaro",
+                            "Tiempo de mezcla\nCesàro (pasos)")
 plt.show()
 
 
 #--------------------------------------
-# VENTANA 4 (NUEVA): cobertura del grafo -> V barra(t) y fraccion de cobertura C(t)
+# VENTANA 3: cobertura del grafo -> V barra(t) y fraccion de cobertura C(t)
 # El eje izquierdo es la fraccion C(t) = V(t)/N y el derecho es V barra(t) (nodos distintos visitados).
 #--------------------------------------
 fig, ax = plt.subplots(figsize=(10, 6))
@@ -393,7 +385,7 @@ plt.show()
 
 
 #--------------------------------------
-# VENTANA 5 (NUEVA): tiempo de cobertura T_cov (media y desviacion estandar por grafo)
+# VENTANA 4: tiempo de cobertura T_cov (media y desviacion estandar por grafo)
 #--------------------------------------
 medias_cov = [np.nanmean(resultados[t]["t_cob"]) if np.any(~np.isnan(resultados[t]["t_cob"])) else 0 for t in tipos_ordenados]
 desv_cov = [np.nanstd(resultados[t]["t_cob"]) if np.any(~np.isnan(resultados[t]["t_cob"])) else 0 for t in tipos_ordenados]
@@ -412,25 +404,74 @@ plt.show()
 
 
 #--------------------------------------
-# VENTANA 6 (NUEVA): tiempo promedio de primera visita por nodo (tau barra_v)
-# Es el "mapa" de que tan accesible es cada nodo desde el nodo inicial.
+# VENTANA 5: poligono de frecuencia del tiempo de cobertura T_cov, los 4 grafos en una sola grafica
+# Se agrupan los T_cov de los caminantes en clases, se calcula la frecuencia relativa de cada clase y se unen
+# con rectas los puntos medios. El eje X es logaritmico (clases de igual ancho en escala log) porque los tiempos
+# van de ~90 pasos (Completo) a varios miles (cola del Camino). La media de cada grafo se marca con una
+# linea vertical punteada del mismo color.
 #--------------------------------------
-fig, ejes = crear_figura_5_grafos()
+N_CLASES = 30
+
+t_cob_todos = {}
 for tipo in tipos_ordenados:
-    ax = ejes[tipo]
-    tau_prom = np.nanmean(resultados[tipo]["tau"], axis=0)   # promedio sobre las simulaciones (ignora nan)
-    ax.bar(range(N_NODOS), tau_prom, color="steelblue", edgecolor="black")
-    ax.set_title(tipo)
-    ax.set_xlabel("Nodo")
-    ax.tick_params(axis="y", labelsize=8)
-ejes["Camino"].set_ylabel("Primera visita promedio")
-ejes["Completo"].set_ylabel("Primera visita promedio")
-fig.suptitle(f"Tiempo promedio de primera visita por nodo (desde el nodo {NODO_INICIAL})")
+    v = resultados[tipo]["t_cob"]
+    t_cob_todos[tipo] = v[~np.isnan(v)]              # solo los caminantes que si cubrieron el grafo
+
+todos = np.concatenate(list(t_cob_todos.values()))
+bordes = np.logspace(np.log10(todos.min()), np.log10(todos.max()), N_CLASES + 1)   # limites de las clases (comunes a los 4 grafos)
+marcas = np.sqrt(bordes[:-1] * bordes[1:])           # punto medio de cada clase (en escala log)
+factor = bordes[1] / bordes[0]                       # cuanto crece cada clase
+x_pol = np.concatenate(([marcas[0] / factor], marcas, [marcas[-1] * factor]))   # cerramos el poligono con una clase vacia en cada extremo
+
+fig, ax = plt.subplots(figsize=(10, 6))
+for k, tipo in enumerate(tipos_ordenados):
+    datos = t_cob_todos[tipo]
+    if datos.size == 0:
+        continue
+    conteo, _ = np.histogram(datos, bins=bordes)
+    frec_rel = conteo / datos.size                   # frecuencia relativa de cada clase
+    y_pol = np.concatenate(([0], frec_rel, [0]))
+    ax.plot(x_pol, y_pol, marker="o", markersize=3, linewidth=1.5, color=f"C{k}",
+            label=f"{tipo} (media = {datos.mean():.0f})")
+    ax.axvline(datos.mean(), color=f"C{k}", linestyle="--", linewidth=1)   # media de T_cov
+
+ax.set_xscale("log")
+ax.set_ylim(bottom=0)
+ax.xaxis.set_major_formatter(mtick.ScalarFormatter())   # muestra 100, 1000 en vez de 10^2, 10^3
+ax.yaxis.set_major_formatter(mtick.FuncFormatter(formato_porcentaje))
+ax.set_xlabel("Tiempo de cobertura T_cov (pasos)")
+ax.set_ylabel("Frecuencia relativa")
+ax.set_title(f"Polígono de frecuencia del tiempo de cobertura desde el nodo {NODO_INICIAL} ({N_SIM} simulaciones por grafo)")
+ax.grid(alpha=0.3)
+ax.legend(loc="upper right")
+plt.tight_layout()
 plt.show()
 
 
 #--------------------------------------
-# VENTANA 7 (NUEVA): numero de retornos al nodo inicial R_0(T)
+# VENTANA 6: tiempo promedio de primera visita por nodo, los 4 grafos en una sola grafica
+# Es lo mismo que las 4 graficas de barras, pero unimos con rectas la punta de cada barra (poligono)
+# y dibujamos los 4 grafos juntos. En el nodo inicial el valor es 0 (ahi empieza el caminante).
+#--------------------------------------
+nodos = np.arange(N_NODOS)
+
+fig, ax = plt.subplots(figsize=(10, 6))
+for tipo in tipos_ordenados:
+    tau_prom = np.nanmean(resultados[tipo]["tau"], axis=0)   # promedio sobre las simulaciones (ignora nan)
+    ax.plot(nodos, tau_prom, marker="o", markersize=4, linewidth=1.5, label=tipo)
+
+ax.xaxis.set_major_locator(mtick.MultipleLocator(2))
+ax.set_xlabel("Nodo")
+ax.set_ylabel("Primera visita promedio (pasos)")
+ax.set_title(f"Tiempo promedio de primera visita por nodo (desde el nodo {NODO_INICIAL})")
+ax.grid(alpha=0.3)
+ax.legend(loc="upper left")
+plt.tight_layout()
+plt.show()
+
+
+#--------------------------------------
+# VENTANA 7: numero de retornos al nodo inicial R_0(T)
 # Se compara con el valor esperado T * pi(0), que es lo que predice la distribucion estacionaria.
 #--------------------------------------
 medias_ret = [resultados[t]["retornos"].mean() for t in tipos_ordenados]
