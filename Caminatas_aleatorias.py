@@ -214,9 +214,11 @@ def cuadro_tiempos_bajo_leyenda(ax, leyenda, resultados, tipos, clave, titulo, s
         etiquetas.append(f"{tipo} = {valor if valor is not None else 'no converge'}")
     vacios = [Line2D([], [], linestyle="none") for _ in etiquetas]   # sin dibujo, solo texto
 
-    ax.legend(vacios, etiquetas, title=titulo, loc="upper left",
-              bbox_to_anchor=(caja.x0, caja.y0 - separacion, caja.width, 0),   # mismo x y mismo ancho que la leyenda
-              mode="expand", borderaxespad=0, handlelength=0, handletextpad=0)
+    cuadro = ax.legend(vacios, etiquetas, title=titulo, loc="upper left",
+                       bbox_to_anchor=(caja.x0, caja.y0 - separacion, caja.width, 0),   # mismo x y mismo ancho que la leyenda
+                       mode="expand", borderaxespad=0, handlelength=0, handletextpad=0,
+                       alignment="left")                     # titulo pegado a la izquierda del cuadro
+    cuadro.get_title().set_multialignment("left")            # cada renglon del titulo tambien alineado a la izquierda
 
 
 #====================================================================
@@ -270,6 +272,33 @@ tipos_ordenados = ["Camino", "Ciclo", "Estrella", "Completo"]
 
 
 #--------------------------------------
+# TAMANO DE IMPRESION DE LAS GRAFICAS
+#   Grupo A (ventanas 1, 6 y 9): misma figura y mismo recuadro de grafica.
+#   Grupo B (ventanas 2, 2b y 3): misma figura y mismo recuadro; son mas anchas porque llevan la leyenda afuera.
+#   figsize = (ancho, alto) en pulgadas. Los margenes son fracciones de la figura (0 = borde izq/abajo, 1 = borde der/arriba).
+#   Ya no se usa plt.tight_layout() en estas ventanas: acomoda cada figura distinto y los recuadros no coincidirian.
+#--------------------------------------
+TAMANO_GRUPO_A = (10, 6)
+MARGENES_GRUPO_A = dict(left=0.10, right=0.97, bottom=0.12, top=0.91)
+
+TAMANO_GRUPO_B = (11, 6)
+MARGENES_GRUPO_B = dict(left=0.08, right=0.74, bottom=0.10, top=0.92)
+
+#--------------------------------------
+# ESTILO GENERAL DE LAS GRAFICAS (texto un poco mas grande)
+# Aplica a todas las ventanas de abajo. Si quieres el texto mas grande o mas chico, cambia solo estos numeros.
+#--------------------------------------
+plt.rcParams.update({
+    "axes.labelsize": 14,      # nombres de los ejes
+    "axes.titlesize": 15,      # titulo de cada grafica
+    "xtick.labelsize": 12,     # numeros del eje X
+    "ytick.labelsize": 12,     # numeros del eje Y
+    "legend.fontsize": 12,     # leyenda
+    "legend.title_fontsize": 12,
+})
+
+
+#--------------------------------------
 # VENTANA 1: frecuencia de visitas por nodo (datos crudos de la simulacion)
 #   Poligono de frecuencia: se unen con rectas las puntas de las barras, y los 4 grafos van en una sola grafica.
 #   El eje Y es logaritmico (como en la de primera visita) porque el centro de la Estrella (nodo 0) recibe ~50%
@@ -277,9 +306,9 @@ tipos_ordenados = ["Camino", "Ciclo", "Estrella", "Completo"]
 #--------------------------------------
 frecuencias = {t: r["H"].sum(axis=0) / r["H"].sum() for t, r in resultados.items()}
 
-fig, ax = plt.subplots(figsize=(10, 6))
+fig, ax = plt.subplots(figsize=TAMANO_GRUPO_A)
 for tipo in tipos_ordenados:
-    ax.plot(range(N_NODOS), frecuencias[tipo], marker="o", markersize=4, linewidth=1.5, label=tipo)
+    ax.plot(range(N_NODOS), frecuencias[tipo], marker="o", markersize=6, linewidth=2.5, label=tipo)
 
 ax.set_yscale("log")
 # marcas "redondas" del eje Y (en fraccion) que caen dentro del rango de los datos
@@ -290,13 +319,15 @@ ax.set_yticks(marcas_y)
 ax.yaxis.set_major_formatter(mtick.FuncFormatter(formato_porcentaje))
 ax.yaxis.set_minor_formatter(mtick.NullFormatter())          # sin etiquetas en las marcas menores
 ax.xaxis.set_major_locator(mtick.MultipleLocator(2))
-ax.set_xlabel("Nodo")
-ax.set_ylabel("Frecuencia de visitas")
-ax.set_title("Frecuencia de visitas por nodo (datos de la simulación)")
+ax.set_xlabel("Nodo", fontsize=16)
+ax.set_ylabel("Frecuencia de visitas", fontsize=16)
+ax.set_title("Frecuencia de visitas por nodo (datos de la simulación)", fontsize=18)
+ax.tick_params(axis="both", labelsize=14)                   # tamaño de los numeros de los ejes
 ax.grid(alpha=0.3)
-ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1), borderaxespad=0)
-plt.tight_layout()
+ax.legend(loc="upper right", ncol=1, fontsize=14)          # leyenda dentro de la grafica, en una sola columna
+fig.subplots_adjust(**MARGENES_GRUPO_A)   # mismo recuadro que las ventanas 6 y 9
 plt.show()
+
 
 
 #--------------------------------------
@@ -304,16 +335,22 @@ plt.show()
 # - Si LLEVAR_A_CERO_TRAS_MEZCLA = True, desde t_mezcla la curva se dibuja en 0 (limite teorico).
 # - Debajo de la leyenda va un cuadro con el tiempo de mezcla de cada grafo.
 #--------------------------------------
-fig, ax = plt.subplots(figsize=(11, 6))
+fig, ax = plt.subplots(figsize=TAMANO_GRUPO_B)
 for tipo in tipos_ordenados:
-    d_graf = resultados[tipo]["d_t"].copy()          # d_t[t] corresponde al paso t (empieza en t = 0)
+    d_graf = resultados[tipo]["d_t"]                 # d_t[t] corresponde al paso t (empieza en t = 0)
     t_mez = resultados[tipo]["t_mezcla"]
+    pasos = np.arange(len(d_graf))
     if LLEVAR_A_CERO_TRAS_MEZCLA and t_mez is not None:
-        d_graf[t_mez:] = 0.0                         # desde que converge, la curva baja a 0 y se queda ahi
-    ax.plot(d_graf, label=tipo, linewidth=1.5)
+        # la curva llega a su valor REAL en t_mezcla (ya debajo de epsilon) y justo AHI cae verticalmente a 0;
+        # para eso se repite el punto t_mezcla: una vez con su valor real y otra con 0
+        x_graf = np.concatenate((pasos[:t_mez + 1], [t_mez], pasos[t_mez + 1:]))
+        y_graf = np.concatenate((d_graf[:t_mez + 1], [0.0], np.zeros(len(pasos) - t_mez - 1)))
+    else:
+        x_graf, y_graf = pasos, d_graf               # no convergio: se dibuja tal cual
+    ax.plot(x_graf, y_graf, label=tipo, linewidth=2)
 
-ax.axhline(y=EPSILON, color="gray", linestyle="--", linewidth=1, label=f"epsilon = {EPSILON}")
-ax.axhline(y=EPSILON2, color="gray", linestyle="--", linewidth=1, label=f"epsilon 2 = {EPSILON2}")
+ax.axhline(y=EPSILON, color="gray", linestyle="--", linewidth=1.3, label=f"epsilon = {EPSILON}")
+ax.axhline(y=EPSILON2, color="gray", linestyle="--", linewidth=1.3, label=f"epsilon 2 = {EPSILON2}")
 
 ax.set_xlabel("Paso (t)")
 ax.set_ylabel("Distancia de variación total d(t)")
@@ -322,26 +359,26 @@ ax.grid(alpha=0.3)
 ax.set_xscale("log")
 
 ax.text(-0.01, EPSILON, r"$\epsilon$", transform=ax.get_yaxis_transform(),
-        ha="right", va="center", fontsize=10, color="gray", clip_on=False)
+        ha="right", va="center", fontsize=13, color="gray", clip_on=False)
 ax.text(-0.01, EPSILON2, r"$\epsilon_2$", transform=ax.get_yaxis_transform(),
-        ha="right", va="center", fontsize=10, color="gray", clip_on=False)
+        ha="right", va="center", fontsize=13, color="gray", clip_on=False)
 
 leyenda = ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1), borderaxespad=0, handlelength=3.5)
-fig.subplots_adjust(left=0.08, right=0.74, bottom=0.10, top=0.92)   # deja espacio a la derecha para leyenda y cuadro
+fig.subplots_adjust(**MARGENES_GRUPO_B)   # deja espacio a la derecha para leyenda y cuadro (igual que 2b y 3)
 cuadro_tiempos_bajo_leyenda(ax, leyenda, resultados, tipos_ordenados, "t_mezcla",
-                            "Tiempo de mezcla\n(pasos)")
+    "Tiempo de mezcla\n(pasos)")
 plt.show()
 
 
 #--------------------------------------
 # VENTANA 2b: d_cesaro(t) vs pasos para las 4 topologias, sobrepuestas
 #--------------------------------------
-fig, ax = plt.subplots(figsize=(11, 6))
+fig, ax = plt.subplots(figsize=TAMANO_GRUPO_B)
 for tipo in tipos_ordenados:
-    ax.plot(range(1, T_PASOS + 1), resultados[tipo]["d_cesaro"], label=tipo, linewidth=1.5)
+    ax.plot(range(1, T_PASOS + 1), resultados[tipo]["d_cesaro"], label=tipo, linewidth=2)
 
-ax.axhline(y=EPSILON, color="gray", linestyle="--", linewidth=1, label=f"epsilon = {EPSILON}")
-ax.axhline(y=EPSILON2, color="gray", linestyle="--", linewidth=1, label=f"epsilon 2 = {EPSILON2}")
+ax.axhline(y=EPSILON, color="gray", linestyle="--", linewidth=1.3, label=f"epsilon = {EPSILON}")
+ax.axhline(y=EPSILON2, color="gray", linestyle="--", linewidth=1.3, label=f"epsilon 2 = {EPSILON2}")
 
 ax.set_xlabel("Paso (t)")
 ax.set_ylabel("Distancia de Cesaro  d_cesaro(t)")
@@ -350,12 +387,12 @@ ax.grid(alpha=0.3)
 ax.set_xscale("log")
 
 ax.text(-0.01, EPSILON, r"$\epsilon$", transform=ax.get_yaxis_transform(),
-        ha="right", va="center", fontsize=10, color="gray", clip_on=False)
+        ha="right", va="center", fontsize=13, color="gray", clip_on=False)
 ax.text(-0.01, EPSILON2, r"$\epsilon_2$", transform=ax.get_yaxis_transform(),
-        ha="right", va="center", fontsize=10, color="gray", clip_on=False)
+        ha="right", va="center", fontsize=13, color="gray", clip_on=False)
 
 leyenda = ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1), borderaxespad=0, handlelength=3.5)
-fig.subplots_adjust(left=0.08, right=0.74, bottom=0.10, top=0.92)
+fig.subplots_adjust(**MARGENES_GRUPO_B)   # igual que 2 y 3
 cuadro_tiempos_bajo_leyenda(ax, leyenda, resultados, tipos_ordenados, "t_mezcla_cesaro",
                             "Tiempo de mezcla\nCesàro (pasos)")
 plt.show()
@@ -365,9 +402,9 @@ plt.show()
 # VENTANA 3: cobertura del grafo -> V barra(t) y fraccion de cobertura C(t)
 # El eje izquierdo es la fraccion C(t) = V(t)/N y el derecho es V barra(t) (nodos distintos visitados).
 #--------------------------------------
-fig, ax = plt.subplots(figsize=(10, 6))
+fig, ax = plt.subplots(figsize=TAMANO_GRUPO_B)
 for tipo in tipos_ordenados:
-    ax.plot(range(1, T_PASOS + 1), resultados[tipo]["C_prom"][1:], label=tipo, linewidth=1.5)
+    ax.plot(range(1, T_PASOS + 1), resultados[tipo]["C_prom"][1:], label=tipo, linewidth=2)
 
 ax.set_xscale("log")
 ax.set_xlabel("Paso (t)")
@@ -380,26 +417,7 @@ ax.legend(loc="upper left", bbox_to_anchor=(1.12, 1), borderaxespad=0)
 # eje derecho: el mismo dato expresado como numero de nodos distintos visitados
 ax_der = ax.secondary_yaxis("right", functions=(lambda c: c * N_NODOS, lambda v: v / N_NODOS))
 ax_der.set_ylabel("Nodos distintos visitados  V(t)")
-plt.tight_layout()
-plt.show()
-
-
-#--------------------------------------
-# VENTANA 4: tiempo de cobertura T_cov (media y desviacion estandar por grafo)
-#--------------------------------------
-medias_cov = [np.nanmean(resultados[t]["t_cob"]) if np.any(~np.isnan(resultados[t]["t_cob"])) else 0 for t in tipos_ordenados]
-desv_cov = [np.nanstd(resultados[t]["t_cob"]) if np.any(~np.isnan(resultados[t]["t_cob"])) else 0 for t in tipos_ordenados]
-
-plt.figure(figsize=(10, 6))
-barras = plt.bar(tipos_ordenados, medias_cov, yerr=desv_cov, capsize=5,
-                 color="#4C72B0", edgecolor="black")
-for barra, media in zip(barras, medias_cov):
-    plt.text(barra.get_x() + barra.get_width() / 2, barra.get_height(),
-             f"{media:.0f}", ha="center", va="bottom", fontsize=9)
-plt.xlabel("Tipo de grafo")
-plt.ylabel("Tiempo de cobertura T_cov (pasos)")
-plt.title(f"Tiempo de cobertura desde el nodo {NODO_INICIAL} (media ± desviación estándar)")
-plt.grid(axis="y", alpha=0.3)
+fig.subplots_adjust(**MARGENES_GRUPO_B)   # mismo recuadro que las ventanas 2 y 2b
 plt.show()
 
 
@@ -431,9 +449,9 @@ for k, tipo in enumerate(tipos_ordenados):
     conteo, _ = np.histogram(datos, bins=bordes)
     frec_rel = conteo / datos.size                   # frecuencia relativa de cada clase
     y_pol = np.concatenate(([0], frec_rel, [0]))
-    ax.plot(x_pol, y_pol, marker="o", markersize=3, linewidth=1.5, color=f"C{k}",
+    ax.plot(x_pol, y_pol, marker="o", markersize=4, linewidth=2, color=f"C{k}",
             label=f"{tipo} (media = {datos.mean():.0f})")
-    ax.axvline(datos.mean(), color=f"C{k}", linestyle="--", linewidth=1)   # media de T_cov
+    ax.axvline(datos.mean(), color=f"C{k}", linestyle="--", linewidth=1.3)   # media de T_cov
 
 ax.set_xscale("log")
 ax.set_ylim(bottom=0)
@@ -441,7 +459,7 @@ ax.xaxis.set_major_formatter(mtick.ScalarFormatter())   # muestra 100, 1000 en v
 ax.yaxis.set_major_formatter(mtick.FuncFormatter(formato_porcentaje))
 ax.set_xlabel("Tiempo de cobertura T_cov (pasos)")
 ax.set_ylabel("Frecuencia relativa")
-ax.set_title(f"Polígono de frecuencia del tiempo de cobertura desde el nodo {NODO_INICIAL} ({N_SIM} simulaciones por grafo)")
+ax.set_title(f"Tiempo de cobertura desde el nodo {NODO_INICIAL} ({N_SIM} simulaciones por grafo)")
 ax.grid(alpha=0.3)
 ax.legend(loc="upper right")
 plt.tight_layout()
@@ -455,10 +473,10 @@ plt.show()
 #--------------------------------------
 nodos = np.arange(N_NODOS)
 
-fig, ax = plt.subplots(figsize=(10, 6))
+fig, ax = plt.subplots(figsize=TAMANO_GRUPO_A)
 for tipo in tipos_ordenados:
     tau_prom = np.nanmean(resultados[tipo]["tau"], axis=0)   # promedio sobre las simulaciones (ignora nan)
-    ax.plot(nodos, tau_prom, marker="o", markersize=4, linewidth=1.5, label=tipo)
+    ax.plot(nodos, tau_prom, marker="o", markersize=5, linewidth=2, label=tipo)
 
 ax.xaxis.set_major_locator(mtick.MultipleLocator(2))
 ax.set_xlabel("Nodo")
@@ -466,27 +484,65 @@ ax.set_ylabel("Primera visita promedio (pasos)")
 ax.set_title(f"Tiempo promedio de primera visita por nodo (desde el nodo {NODO_INICIAL})")
 ax.grid(alpha=0.3)
 ax.legend(loc="upper left")
-plt.tight_layout()
+fig.subplots_adjust(**MARGENES_GRUPO_A)   # mismo recuadro que las ventanas 1 y 9
 plt.show()
 
 
-#--------------------------------------
-# VENTANA 7: numero de retornos al nodo inicial R_0(T)
-# Se compara con el valor esperado T * pi(0), que es lo que predice la distribucion estacionaria.
-#--------------------------------------
-medias_ret = [resultados[t]["retornos"].mean() for t in tipos_ordenados]
-desv_ret = [resultados[t]["retornos"].std() for t in tipos_ordenados]
-esperados = [T_PASOS * resultados[t]["pi"][NODO_INICIAL] for t in tipos_ordenados]
 
-x = np.arange(len(tipos_ordenados))
-plt.figure(figsize=(10, 6))
-plt.bar(x, medias_ret, yerr=desv_ret, capsize=5, color="#DD8452", edgecolor="black",
-        label="Simulación (media ± desv.)")
-plt.scatter(x, esperados, color="black", marker="D", zorder=3, label=r"Esperado  $T\,\pi(0)$")
-plt.xticks(x, tipos_ordenados)
-plt.xlabel("Tipo de grafo")
-plt.ylabel(f"Retornos al nodo {NODO_INICIAL}  R_0(T)")
-plt.title(f"Número de retornos al nodo inicial en T = {T_PASOS} pasos")
-plt.legend()
-plt.grid(axis="y", alpha=0.3)
+#--------------------------------------
+# VENTANA 9: poligono de frecuencia del tiempo promedio de retorno al nodo inicial
+# Para cada caminante se calcula su tiempo promedio de retorno T / R_0(T); se agrupan en clases, se calcula
+# la frecuencia relativa de cada clase y se unen con rectas los puntos medios (igual que en la ventana 5).
+# La linea vertical punteada de cada color es el valor teorico 1/pi(0).
+# La Estrella NO se dibuja como poligono: ahi TODOS los caminantes tardan exactamente 2 pasos
+# (centro -> hoja -> centro), asi que seria un solo pico de 100% lejos de los demas grafos.
+# Se indica con un texto dentro de la grafica.
+#--------------------------------------
+N_CLASES_RET = 30
+
+t_ret_todos = {}
+for tipo in tipos_ordenados:
+    ret = resultados[tipo]["retornos"].astype(float)
+    t_ret_todos[tipo] = T_PASOS / ret[ret > 0]          # tiempo promedio de retorno de cada caminante
+
+tipos_poligono = [t for t in tipos_ordenados if t != "Estrella"]
+todos_ret = np.concatenate([t_ret_todos[t] for t in tipos_poligono])
+bordes_ret = np.logspace(np.log10(todos_ret.min()), np.log10(todos_ret.max()), N_CLASES_RET + 1)  # clases comunes
+marcas_ret = np.sqrt(bordes_ret[:-1] * bordes_ret[1:])     # punto medio de cada clase (en escala log)
+factor_ret = bordes_ret[1] / bordes_ret[0]
+x_ret = np.concatenate(([marcas_ret[0] / factor_ret], marcas_ret, [marcas_ret[-1] * factor_ret]))  # cerramos el poligono
+
+fig, ax = plt.subplots(figsize=TAMANO_GRUPO_A)
+maximo = 0
+for k, tipo in enumerate(tipos_ordenados):
+    if tipo not in tipos_poligono:
+        continue
+    datos = t_ret_todos[tipo]
+    conteo, _ = np.histogram(datos, bins=bordes_ret)
+    frec_rel = conteo / datos.size                     # frecuencia relativa de cada clase
+    y_ret = np.concatenate(([0], frec_rel, [0]))
+    esperado = 1 / resultados[tipo]["pi"][NODO_INICIAL]
+    ax.plot(x_ret, y_ret, marker="o", markersize=4, linewidth=2, color=f"C{k}",   # mismo color que en las demas graficas
+            label=f"{tipo} (media = {datos.mean():.1f}, teórico = {esperado:.0f})")
+    ax.axvline(esperado, color=f"C{k}", linestyle="--", linewidth=1.3)   # valor teorico 1/pi(0)
+    maximo = max(maximo, frec_rel.max())
+
+if "Estrella" in t_ret_todos:
+    ax.text(0.98, 0.72, f"Estrella: todos los caminantes tardan\n{t_ret_todos['Estrella'].mean():.0f} pasos (teórico = 2)",
+            transform=ax.transAxes, ha="right", va="top", fontsize=12, color="C2",
+            bbox=dict(boxstyle="round", facecolor="white", edgecolor="C2"))
+
+ax.set_xscale("log")
+ax.set_ylim(0, maximo * 1.15)                          # espacio arriba para que no se corte el pico
+marcas_x = [m for m in [10, 15, 20, 30, 50, 100, 200, 500] if bordes_ret[0] <= m <= bordes_ret[-1] * 1.2]
+ax.set_xticks(marcas_x)
+ax.xaxis.set_major_formatter(mtick.ScalarFormatter())   # muestra 20, 50, 100 en vez de potencias de 10
+ax.xaxis.set_minor_formatter(mtick.NullFormatter())     # sin numeros en las marcas pequenas
+ax.yaxis.set_major_formatter(mtick.FuncFormatter(formato_porcentaje))
+ax.set_xlabel(f"Tiempo promedio de retorno al nodo {NODO_INICIAL} (pasos)")
+ax.set_ylabel("Frecuencia relativa")
+ax.set_title(f"Tiempo promedio de retorno al nodo inicial ({N_SIM} simulaciones por grafo)")
+ax.grid(alpha=0.3)
+ax.legend(loc="upper right")
+fig.subplots_adjust(**MARGENES_GRUPO_A)   # mismo recuadro que las ventanas 1 y 6
 plt.show()
